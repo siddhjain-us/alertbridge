@@ -1,0 +1,4 @@
+node_modules/
+db/alertbridge.db
+.env
+.claude/settings.json
