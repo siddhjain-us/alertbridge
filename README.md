@@ -14,6 +14,7 @@ Emergency alerts from public feeds (NWS CAP), matched to subscribers by location
 ## Requirements
 
 - **Node.js** 18+
+- **GNU Make** (optional): convenience targets for install, run, and seed — run **`make help`** at the repo root (see [Setup](#setup)).
 - **Ollama** running locally (default `http://localhost:11434`, model `llama3.2` or set `OLLAMA_MODEL`)
 - **LibreTranslate** (optional, Python): the npm package named `libretranslate` is only a **client library** (no CLI — `npx libretranslate` will error). Install the [official server](https://docs.libretranslate.com/guides/installation/) with **`pip install libretranslate`**, then in another terminal run **`libretranslate --port 5000`** (first run may download language models). Set `LIBRETRANSLATE_URL` in `.env` as below.
 
@@ -22,6 +23,8 @@ Emergency alerts from public feeds (NWS CAP), matched to subscribers by location
 ```bash
 npm install
 ```
+
+Or use the **Makefile** (see `make help` for targets): **`make setup`** runs `npm install` and **`mkdir -p db`**. On Windows, use **Git Bash**, **WSL**, or another environment where `make` is available.
 
 Create `.env` (optional overrides):
 
@@ -35,7 +38,7 @@ LIBRETRANSLATE_LANGS=zh,vi,ko
 # LIBRETRANSLATE_API_KEY=
 ```
 
-Ensure `db/` exists; SQLite will create `db/alertbridge.db` on first run.
+Ensure `db/` exists (`make setup` creates it); SQLite will create `db/alertbridge.db` on first run.
 
 ### Data persistence and reset
 
@@ -48,14 +51,18 @@ Ensure `db/` exists; SQLite will create `db/alertbridge.db` on first run.
 Seed six users in ZIP **94102** (one per language: en, es, zh, vi, ko, tl):
 
 ```bash
-npm run seed:demo
+make seed
 ```
+
+(`npm run seed:demo` is equivalent.)
 
 ## Run
 
 ```bash
-npx tsx index.ts
+make run
 ```
+
+(`npx tsx index.ts` is equivalent. **`make start`** does the same as **`make run`**.)
 
 Open the dashboard: **http://localhost:3000**
 
@@ -89,6 +96,7 @@ src/
   dashboard/    # Express UI + APIs + simulateScenarios.ts
 db/             # SQLite (gitignored)
 docs/           # e.g. disasters.md (hazard reference)
+Makefile        # make setup | make run | make seed (see make help)
 index.ts        # Starts all services
 ```
 
