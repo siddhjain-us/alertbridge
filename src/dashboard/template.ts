@@ -553,7 +553,6 @@ export function renderDashboard(data: DashboardData): string {
         return;
       }
 
-      const isNew = entries.length > lastCount;
       lastCount = entries.length;
 
       tbody.innerHTML = entries.map((e) => {
