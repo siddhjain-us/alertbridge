@@ -81,7 +81,7 @@ function cleanResponse(raw: string, lang: string): string {
  * Translate one alert into one language.
  * Checks in-memory cache first — only calls Ollama on a cache miss.
  */
-async function translateOne(alertId: string, alertText: string, lang: string): Promise<string> {
+export async function translateOne(alertId: string, alertText: string, lang: string): Promise<string> {
   const cached = getCached(alertId, lang);
   if (cached) {
     console.log(`[ai-rewriter] Cache hit: ${alertId}:${lang}`);
@@ -141,6 +141,11 @@ export async function rewriteDispatch(
   console.log(`[ai-rewriter] Alert ${alertId} ready=${allDone} for ${langs.length} language(s)`);
 
   return results;
+}
+
+// Export start function for the orchestrator
+export function startRewriter() {
+  console.log(`[ai-rewriter] Using Ollama at ${OLLAMA_URL} with model ${OLLAMA_MODEL}`);
 }
 
 export { getCached, setCached } from './cache';

@@ -22,3 +22,10 @@ Emergency alert translation system. Monitors NWS/IPAWS feeds and delivers plain-
 - `alert:latest` — most recent alert object from poller
 - `dispatch:latest` — most recent dispatch list from geo-matcher
 - `translated:<alert_id>:<lang>` — translated message cache
+
+## Token budget
+- Keep responses concise — no lengthy explanations unless asked
+- When making code changes, show only the changed lines not entire files
+- Do not re-read files you have already read in this session
+- Maximum one tool call per step unless absolutely necessary
+- If a task can be done in one file edit, do not split into multiple steps

@@ -36,8 +36,12 @@ try {
   console.warn('[dashboard] Could not init DB:', err);
 }
 
-app.listen(PORT, () => {
-  console.log(`[dashboard] Server running at http://localhost:${PORT}`);
-});
+// Export start function for the orchestrator
+export function startDashboard() {
+  app.listen(PORT, () => {
+    console.log(`[dashboard] Server running at http://localhost:${PORT}`);
+  });
+  return app;
+}
 
 export default app;

@@ -2,3 +2,9 @@ node_modules/
 db/alertbridge.db
 .env
 .claude/settings.json
+
+# Local agent skill artifacts (large CSVs / bytecode)
+.claude/skills/ui-ux-pro-max/data/
+.claude/skills/ui-ux-pro-max/scripts/__pycache__/
+**/__pycache__/
+*.pyc

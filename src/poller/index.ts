@@ -1,6 +1,9 @@
 import cron from 'node-cron';
 import { parseFeed } from './parser';
 import { Alert } from './types';
+import { matchAlert } from '../matcher/index';
+import { rewriteDispatch } from '../rewriter/index';
+import { dispatchAlert } from '../dispatcher/index';
 
 const NWS_URL = 'https://alerts.weather.gov/cap/us.php?x=1';
 const seenIds = new Set<string>();
@@ -20,8 +23,24 @@ async function pollAlerts(): Promise<void> {
       if (!alert.id || seenIds.has(alert.id)) continue;
       seenIds.add(alert.id);
       newCount++;
+
       console.log(`[alert-poller] NEW ALERT: ${alert.event} | ${alert.severity} | ${alert.areaDesc}`);
       console.log(`[alert-poller] ID: ${alert.id}`);
+
+      // Process the alert through the pipeline
+      try {
+        // 1. Match alert to affected users
+        const dispatch = matchAlert(alert);
+
+        // 2. Translate alert to user languages
+        const translations = await rewriteDispatch(dispatch);
+
+        // 3. Send SMS alerts to users
+        await dispatchAlert(dispatch, translations);
+
+      } catch (error) {
+        console.error(`[alert-poller] Error processing alert ${alert.id}:`, error);
+      }
     }
 
     if (newCount === 0) {
@@ -34,10 +53,16 @@ async function pollAlerts(): Promise<void> {
   }
 }
 
-console.log('[alert-poller] Starting cron loop (every 60s)...');
-pollAlerts(); // Run immediately on startup
+// Export start function for the orchestrator
+export function startPoller() {
+  console.log('[alert-poller] Starting cron loop (every 60s)...');
+  pollAlerts(); // Run immediately on startup
 
-cron.schedule('* * * * *', () => {
-  console.log('[alert-poller] Cron tick — polling NWS...');
-  pollAlerts();
-});
+  cron.schedule('* * * * *', () => {
+    console.log('[alert-poller] Cron tick — polling NWS...');
+    pollAlerts();
+  });
+}
+
+// Export functions for testing/importing
+export { pollAlerts };

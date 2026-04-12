@@ -24,4 +24,9 @@ router.post('/sms', (req: Request, res: Response) => {
   res.send(twiml(reply));
 });
 
+// Export start function for the orchestrator
+export function startRegistration() {
+  console.log('[registration] SMS webhook ready at /sms');
+}
+
 export default router;

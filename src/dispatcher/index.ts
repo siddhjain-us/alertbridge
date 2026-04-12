@@ -1,18 +1,62 @@
-import { DispatchList } from '../matcher/types';
+import Database from 'better-sqlite3';
+import path from 'path';
+import type { DispatchList } from '../matcher/types';
+import {
+  type MockSmsEntry,
+  type MockSmsMemoryPayload,
+  keyDispatch,
+  keyTranslated,
+  keyMockSms,
+  serializeDispatch,
+} from './types';
 
-export interface MockSmsEntry {
-  phone: string;       // last 4 digits only
-  language: string;
-  message: string;
-  alertType: string;
-  sentAt: string;
-}
+export type { MockSmsEntry } from './types';
 
-// In-process store — shared via Node module cache with dashboard routes
+const DB_PATH = path.join(__dirname, '../../db/alertbridge.db');
+
+/** In-process agent memory simulation (same process as poller/dashboard) */
+const agentMemory = new Map<string, string>();
+
 const store: MockSmsEntry[] = [];
 
+function getDb(): Database.Database {
+  return new Database(DB_PATH);
+}
+
+/** Returns true if this row was newly inserted (not a duplicate). */
+function tryClaimSent(db: Database.Database, phone: string, alertId: string): boolean {
+  const r = db
+    .prepare(
+      `INSERT OR IGNORE INTO sent_alerts (phone, alert_id, status) VALUES (?, ?, 'sent')`
+    )
+    .run(phone, alertId);
+  return r.changes > 0;
+}
+
+/**
+ * Populate memory keys from pipeline args, then downstream logic reads the same keys.
+ */
+function writeMemoryFromDispatch(
+  dispatch: DispatchList,
+  translations: Record<string, string>,
+): void {
+  agentMemory.set(keyDispatch(dispatch.alertId), serializeDispatch(dispatch));
+  for (const [lang, text] of Object.entries(translations)) {
+    agentMemory.set(keyTranslated(dispatch.alertId, lang), text);
+  }
+}
+
+function readTranslated(alertId: string, language: string): string | undefined {
+  return agentMemory.get(keyTranslated(alertId, language));
+}
+
+function appendMockSmsMemory(payload: MockSmsMemoryPayload): void {
+  const ts = payload.sentAt;
+  agentMemory.set(keyMockSms(ts), JSON.stringify(payload));
+}
+
 export function getMockSmsLog(): MockSmsEntry[] {
-  return [...store].reverse(); // newest first
+  return [...store].reverse();
 }
 
 export function getMockSmsCount(): number {
@@ -24,43 +68,80 @@ function sendMockSms(
   lang: string,
   message: string,
   alertType: string,
+  alertId: string,
 ): void {
   const last4 = to.replace(/\D/g, '').slice(-4);
+  const sentAt = new Date().toISOString();
   const entry: MockSmsEntry = {
     phone: last4,
     language: lang,
     message,
     alertType,
-    sentAt: new Date().toISOString(),
+    sentAt,
+    alertId,
   };
   store.push(entry);
+
+  appendMockSmsMemory({
+    phoneLast4: last4,
+    language: lang,
+    message,
+    alertId,
+    alertType,
+    sentAt,
+  });
+
   console.log(`[MOCK SMS] To: +1***${last4} | Lang: ${lang} | Message: ${message}`);
 }
 
 /**
- * Fan-out mock SMS delivery to all users in the dispatch list.
- * Concurrency-limited to 5 (mirrors the real Twilio dispatcher spec).
+ * Fan-out mock SMS delivery. Reads translations from memory keys after they are set from args.
+ * Concurrency-limited to 5; dedupes via sent_alerts.
  */
 export async function dispatchAlert(
   dispatch: DispatchList,
   translations: Record<string, string>,
 ): Promise<void> {
-  const { users, event } = dispatch;
+  writeMemoryFromDispatch(dispatch, translations);
+
+  const { users, event, alertId } = dispatch;
   console.log(`[dispatcher] Sending ${users.length} mock SMS(es) for "${event}"...`);
 
   const CONCURRENCY = 5;
-  for (let i = 0; i < users.length; i += CONCURRENCY) {
-    const batch = users.slice(i, i + CONCURRENCY);
-    await Promise.all(
-      batch.map(async ({ phone, language }) => {
-        const message =
-          translations[language] ??
-          translations['en'] ??
-          `Emergency: ${event}. Check local authorities for details.`;
-        sendMockSms(phone, language, message, event);
-      }),
-    );
+  const db = getDb();
+  try {
+    for (let i = 0; i < users.length; i += CONCURRENCY) {
+      const batch = users.slice(i, i + CONCURRENCY);
+      await Promise.all(
+        batch.map(async ({ phone, language }) => {
+          if (!tryClaimSent(db, phone, alertId)) {
+            console.log(
+              `[dispatcher] Skip duplicate sent_alerts: …${phone.replace(/\D/g, '').slice(-4)} alert=${alertId}`
+            );
+            return;
+          }
+
+          const fromMemory =
+            readTranslated(alertId, language) ??
+            translations[language] ??
+            translations['en'];
+          const message =
+            fromMemory ?? `Emergency: ${event}. Check local authorities for details.`;
+
+          sendMockSms(phone, language, message, event, alertId);
+        }),
+      );
+    }
+  } finally {
+    db.close();
   }
 
-  console.log(`[dispatcher] Done — ${users.length} mock SMS(es) delivered.`);
+  console.log(`[dispatcher] Done — processed ${users.length} recipient(s) for alert ${alertId}.`);
+}
+
+export function startDispatcher() {
+  const demo = process.env.DEMO_MODE === 'true';
+  console.log(
+    `[dispatcher] Mock SMS dispatcher ready${demo ? ' (DEMO_MODE)' : ''}`
+  );
 }

@@ -81,3 +81,9 @@ export function matchByZip(alert: Alert, zip: string): DispatchList {
     createdAt: new Date().toISOString(),
   };
 }
+
+// Export start function for the orchestrator
+export function startMatcher() {
+  console.log('[geo-matcher] Loaded FIPS crosswalk: ${Object.keys(fipsToZips({})).length} counties');
+  loadCrosswalk();
+}
