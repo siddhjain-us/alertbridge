@@ -2,7 +2,10 @@ export interface DashboardData {
   totalUsers: number;
   languageBreakdown: { language: string; count: number }[];
   totalSmsSent: number;
+  subscribers: { zip: string; language: string; phoneLast4: string }[];
 }
+
+import { SIMULATE_SCENARIOS } from './simulateScenarios';
 
 /** Display names — text-only labels (readable without flag emoji reliance) */
 const LANG_LABELS: Record<string, string> = {
@@ -13,6 +16,17 @@ const LANG_LABELS: Record<string, string> = {
   tl: 'Tagalog',
   ko: '한국어',
 };
+
+function escOptionLabel(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function scenarioSelectOptionsHtml(): string {
+  return SIMULATE_SCENARIOS.map(
+    (sc) =>
+      `<option value="${sc.id}"${sc.id === 'flash_flood' ? ' selected' : ''}>${escOptionLabel(sc.label)}</option>`,
+  ).join('');
+}
 
 function langBar(breakdown: { language: string; count: number }[], total: number): string {
   if (!breakdown.length) {
@@ -34,8 +48,42 @@ function langBar(breakdown: { language: string; count: number }[], total: number
     .join('');
 }
 
+function subscribersTable(
+  subs: { zip: string; language: string; phoneLast4: string }[],
+  langLabels: Record<string, string>,
+): string {
+  const rows = subs.length
+    ? subs
+        .map(
+          (s) => `
+            <tr>
+              <td class="zip-cell">${s.zip}</td>
+              <td>${langLabels[s.language] ?? s.language}</td>
+              <td class="phone-cell">···${s.phoneLast4}</td>
+            </tr>`,
+        )
+        .join('')
+    : '<tr><td colspan="3"><p class="lang-empty" style="padding:12px 16px">No subscribers yet.</p></td></tr>';
+  return `
+    <div class="sms-log-wrap" style="margin-top:8px">
+      <table>
+        <caption class="visually-hidden">Registered subscribers by ZIP</caption>
+        <thead>
+          <tr>
+            <th scope="col">ZIP</th>
+            <th scope="col">Language</th>
+            <th scope="col">Phone</th>
+          </tr>
+        </thead>
+        <tbody id="subs-tbody">
+          ${rows}
+        </tbody>
+      </table>
+    </div>`;
+}
+
 export function renderDashboard(data: DashboardData): string {
-  const { totalUsers, languageBreakdown, totalSmsSent } = data;
+  const { totalUsers, languageBreakdown, totalSmsSent, subscribers } = data;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -121,6 +169,27 @@ export function renderDashboard(data: DashboardData): string {
       -webkit-background-clip: text;
       background-clip: text;
       color: transparent;
+    }
+    .clear-btn {
+      margin-left: auto;
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid rgba(255,107,107,.35);
+      padding: 8px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      font-weight: 600;
+      font-family: var(--font);
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+    }
+    .clear-btn:hover {
+      background: rgba(255,107,107,.08);
+      border-color: rgba(255,107,107,.55);
+    }
+    .clear-btn:disabled {
+      opacity: .5;
+      cursor: not-allowed;
     }
     .badge-pill {
       display: inline-flex;
@@ -310,7 +379,8 @@ export function renderDashboard(data: DashboardData): string {
       border-collapse: collapse;
       font-size: 14px;
     }
-    caption {
+    caption,
+    .visually-hidden {
       position: absolute;
       width: 1px; height: 1px;
       padding: 0; margin: -1px;
@@ -319,6 +389,10 @@ export function renderDashboard(data: DashboardData): string {
       white-space: nowrap;
       border: 0;
     }
+
+    .hazards-lede { color: var(--text-muted); font-size: 14px; margin-bottom: 12px; max-width: 52rem; }
+    .hazards-more a { color: var(--accent); text-decoration: underline; font-size: 14px; }
+    .hazards-more a:hover { filter: brightness(1.1); }
     th {
       color: var(--text-dim);
       text-align: left;
@@ -351,6 +425,7 @@ export function renderDashboard(data: DashboardData): string {
       animation: pulse 2s ease-in-out infinite;
     }
     .phone-cell { font-family: var(--mono); font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+    .zip-cell { font-family: var(--mono); font-size: 13px; color: var(--accent); white-space: nowrap; }
     .lang-cell { color: var(--text); }
     .msg-cell {
       color: var(--text);
@@ -418,6 +493,10 @@ export function renderDashboard(data: DashboardData): string {
       outline: none;
     }
     .sim-input::placeholder { color: var(--text-dim); }
+    select.sim-input {
+      cursor: pointer;
+      max-width: min(100%, 340px);
+    }
     .sim-btn {
       background: var(--accent);
       color: #041208;
@@ -459,6 +538,7 @@ export function renderDashboard(data: DashboardData): string {
       <div class="hero-top">
         <h1>AlertBridge</h1>
         <span class="badge-pill" aria-label="Build mode">Mock delivery · v1</span>
+        <button type="button" class="clear-btn" id="clear-db-btn" title="Remove all users, SQLite history, mock SMS log, and translation cache">Clear demo data</button>
       </div>
       <p class="subtitle" id="ts">Emergency alerts translated into each subscriber&apos;s language — live ops view.</p>
     </header>
@@ -468,9 +548,9 @@ export function renderDashboard(data: DashboardData): string {
         <div class="stat-label">Registered users</div>
         <div class="stat-num" id="stat-users">${totalUsers}</div>
       </div>
-      <div class="stat-card" role="listitem">
+      <div class="stat-card">
         <div class="stat-label">Languages in use</div>
-        <div class="stat-num">${languageBreakdown.length || '—'}</div>
+        <div class="stat-num" id="stat-langs">${languageBreakdown.length || '—'}</div>
       </div>
       <div class="stat-card accent-edge">
         <div class="stat-label">Mock SMS sent</div>
@@ -485,6 +565,24 @@ export function renderDashboard(data: DashboardData): string {
       <div id="lang-bars">${langBar(languageBreakdown, totalUsers)}</div>
     </section>
 
+    <section class="card" aria-labelledby="hazards-heading">
+      <div class="card-header">
+        <h2 class="card-title" id="hazards-heading">Hazard types</h2>
+      </div>
+      <p class="hazards-lede">
+        Natural hazards include floods, hurricanes, earthquakes, wildfires, tornadoes, droughts, tsunamis, landslides, and volcanic eruptions—each with distinct risks. See the reference for one-line definitions.
+      </p>
+      <p class="hazards-more"><a href="/docs/disasters">Read full reference (markdown)</a></p>
+    </section>
+
+    <section class="card" aria-labelledby="subs-heading">
+      <div class="card-header">
+        <h2 class="card-title" id="subs-heading">Registered subscribers</h2>
+      </div>
+      <p style="color:var(--text-dim);font-size:13px;margin-bottom:12px">Phone shows last four digits; ZIP shows where alerts are targeted.</p>
+      ${subscribersTable(subscribers, LANG_LABELS)}
+    </section>
+
     <section class="card simulate-card" aria-labelledby="sim-heading">
       <div class="card-header">
         <h2 class="card-title" id="sim-heading">Demo: simulate alert</h2>
@@ -493,6 +591,12 @@ export function renderDashboard(data: DashboardData): string {
         <div class="field">
           <label for="sim-zip">ZIP code</label>
           <input class="sim-input" id="sim-zip" name="zip" type="text" inputmode="numeric" placeholder="e.g. 94102" maxlength="5" pattern="\\d{5}" autocomplete="postal-code" aria-describedby="sim-status">
+        </div>
+        <div class="field">
+          <label for="sim-scenario">Scenario</label>
+          <select class="sim-input" id="sim-scenario" name="scenario" aria-describedby="sim-status">
+            ${scenarioSelectOptionsHtml()}
+          </select>
         </div>
         <button type="button" class="sim-btn" id="sim-btn" aria-busy="false">Send test alert</button>
       </div>
@@ -512,6 +616,7 @@ export function renderDashboard(data: DashboardData): string {
           <thead>
             <tr>
               <th scope="col">Phone</th>
+              <th scope="col">ZIP</th>
               <th scope="col">Language</th>
               <th scope="col">Message</th>
               <th scope="col">Alert type</th>
@@ -519,7 +624,7 @@ export function renderDashboard(data: DashboardData): string {
             </tr>
           </thead>
           <tbody id="sms-tbody">
-            <tr><td colspan="5"><div class="empty-state"><p>No messages yet</p><small>Use &quot;Send test alert&quot; after seeding users for that ZIP.</small></div></td></tr>
+            <tr><td colspan="6"><div class="empty-state"><p>No messages yet</p><small>Use &quot;Send test alert&quot; after seeding users for that ZIP.</small></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -548,7 +653,7 @@ export function renderDashboard(data: DashboardData): string {
       statSms.textContent = entries.length;
 
       if (!entries.length) {
-        tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><p>No messages yet</p><small>Use &quot;Send test alert&quot; after seeding users for that ZIP.</small></div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><p>No messages yet</p><small>Use &quot;Send test alert&quot; after seeding users for that ZIP.</small></div></td></tr>';
         lastCount = 0;
         return;
       }
@@ -560,8 +665,10 @@ export function renderDashboard(data: DashboardData): string {
         const fresh = ageMs < 8000;
         const timeStr = new Date(e.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         const langLabel = LANG_LABELS[e.language] || e.language;
+        const zip = e.zip != null ? escHtml(String(e.zip)) : '—';
         return \`<tr class="\${fresh ? 'is-new' : ''}">
           <td class="phone-cell">\${fresh ? '<span class="entry-dot" aria-hidden="true"></span>' : ''}<span class="phone-mask" aria-hidden="true">+1···</span>\${e.phone}</td>
+          <td class="zip-cell">\${zip}</td>
           <td class="lang-cell">\${escHtml(langLabel)}</td>
           <td class="msg-cell">\${escHtml(e.message)}</td>
           <td class="type-cell">\${escHtml(e.alertType)}</td>
@@ -577,19 +684,88 @@ export function renderDashboard(data: DashboardData): string {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
+  function renderLangBars(breakdown, total) {
+    const el = document.getElementById('lang-bars');
+    if (!el) return;
+    if (!breakdown.length) {
+      el.innerHTML = '<p class="lang-empty">No users registered yet. Run <code>npm run seed:demo</code> or register via <code>POST /sms</code>.</p>';
+      return;
+    }
+    el.innerHTML = breakdown.map(({ language, count }) => {
+      const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+      const label = LANG_LABELS[language] ?? language;
+      return (
+        '<div class="lang-row">' +
+        '<span class="lang-name">' + escHtml(label) + '</span>' +
+        '<div class="lang-track" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100" aria-label="' + escHtml(label) + ' ' + pct + ' percent">' +
+        '<div class="lang-fill" style="width:' + pct + '%"></div></div>' +
+        '<span class="lang-pct">' + count + ' <span class="lang-pct-sub">(' + pct + '%)</span></span></div>'
+      );
+    }).join('');
+  }
+
+  async function refreshStats() {
+    try {
+      const res = await fetch('/api/stats');
+      if (!res.ok) return;
+      const d = await res.json();
+      const tu = d.totalUsers ?? 0;
+      document.getElementById('stat-users').textContent = tu;
+      const lb = d.languageBreakdown || [];
+      const langN = lb.length;
+      document.getElementById('stat-langs').textContent = langN ? langN : '—';
+      document.getElementById('stat-sms').textContent = d.totalSmsSent ?? 0;
+      renderLangBars(lb, tu);
+    } catch (e) {
+      console.warn('stats refresh:', e);
+    }
+  }
+
+  async function refreshSubscribers() {
+    try {
+      const res = await fetch('/api/subscribers');
+      if (!res.ok) return;
+      const data = await res.json();
+      const subs = data.subscribers || [];
+      const tb = document.getElementById('subs-tbody');
+      if (!tb) return;
+      if (!subs.length) {
+        tb.innerHTML = '<tr><td colspan="3"><p class="lang-empty" style="padding:12px 16px">No subscribers yet.</p></td></tr>';
+        return;
+      }
+            tb.innerHTML = subs
+        .map(
+          (s) =>
+            '<tr><td class="zip-cell">' +
+            escHtml(s.zip) +
+            '</td><td>' +
+            escHtml(LANG_LABELS[s.language] || s.language) +
+            '</td><td class="phone-cell">···' +
+            escHtml(s.phoneLast4) +
+            '</td></tr>',
+        )
+        .join('');
+    } catch (e) {
+      console.warn('subscribers refresh:', e);
+    }
+  }
+
   let nextRefresh = 3;
   function tick() {
     document.getElementById('ticker').textContent = 'Next refresh in ' + nextRefresh + 's';
     if (--nextRefresh < 0) {
       nextRefresh = 3;
       refreshSmsLog();
+      refreshSubscribers();
     }
   }
   refreshSmsLog();
+  refreshSubscribers();
   setInterval(tick, 1000);
 
   async function simulate() {
     const zip = document.getElementById('sim-zip').value.trim();
+    const scenario = document.getElementById('sim-scenario').value;
     const btn = document.getElementById('sim-btn');
     const status = document.getElementById('sim-status');
 
@@ -609,7 +785,7 @@ export function renderDashboard(data: DashboardData): string {
       const res = await fetch('/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zip }),
+        body: JSON.stringify({ zip, scenario }),
       });
       const data = await res.json();
       status.className = data.ok ? '' : 'error';
@@ -630,6 +806,25 @@ export function renderDashboard(data: DashboardData): string {
   document.getElementById('sim-btn').addEventListener('click', simulate);
   document.getElementById('sim-zip').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') simulate();
+  });
+
+  document.getElementById('clear-db-btn').addEventListener('click', async () => {
+    if (!confirm('Clear all registered users, sent-alert history, mock SMS log, and translation cache? This cannot be undone.')) return;
+    const btn = document.getElementById('clear-db-btn');
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/clear-data', { method: 'POST' });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.message || 'Clear failed');
+      nextRefresh = 0;
+      await refreshStats();
+      await refreshSmsLog();
+      await refreshSubscribers();
+    } catch (err) {
+      alert(err && err.message ? err.message : String(err));
+    } finally {
+      btn.disabled = false;
+    }
   });
 </script>
 </body>

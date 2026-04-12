@@ -63,12 +63,19 @@ export function getMockSmsCount(): number {
   return store.length;
 }
 
+/** Clear mock SMS log and agent memory (call when resetting demo DB). */
+export function clearMockSmsState(): void {
+  store.length = 0;
+  agentMemory.clear();
+}
+
 function sendMockSms(
   to: string,
   lang: string,
   message: string,
   alertType: string,
   alertId: string,
+  zip: string,
 ): void {
   const last4 = to.replace(/\D/g, '').slice(-4);
   const sentAt = new Date().toISOString();
@@ -79,6 +86,7 @@ function sendMockSms(
     alertType,
     sentAt,
     alertId,
+    zip,
   };
   store.push(entry);
 
@@ -89,6 +97,7 @@ function sendMockSms(
     alertId,
     alertType,
     sentAt,
+    zip,
   });
 
   console.log(`[MOCK SMS] To: +1***${last4} | Lang: ${lang} | Message: ${message}`);
@@ -113,7 +122,7 @@ export async function dispatchAlert(
     for (let i = 0; i < users.length; i += CONCURRENCY) {
       const batch = users.slice(i, i + CONCURRENCY);
       await Promise.all(
-        batch.map(async ({ phone, language }) => {
+        batch.map(async ({ phone, language, zip }) => {
           if (!tryClaimSent(db, phone, alertId)) {
             console.log(
               `[dispatcher] Skip duplicate sent_alerts: …${phone.replace(/\D/g, '').slice(-4)} alert=${alertId}`
@@ -128,7 +137,7 @@ export async function dispatchAlert(
           const message =
             fromMemory ?? `Emergency: ${event}. Check local authorities for details.`;
 
-          sendMockSms(phone, language, message, event, alertId);
+          sendMockSms(phone, language, message, event, alertId, zip);
         }),
       );
     }

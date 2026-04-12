@@ -39,3 +39,8 @@ const insertStmt = db.prepare(`
 export function insertUser(user: UserRecord): void {
   insertStmt.run(user);
 }
+
+/** Remove all users and sent_alerts (demo reset). */
+export function clearSqliteData(): void {
+  db.exec('DELETE FROM sent_alerts; DELETE FROM users;');
+}

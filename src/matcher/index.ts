@@ -30,7 +30,7 @@ export function matchAlert(alert: Alert): DispatchList {
       const placeholders = affectedZips.map(() => '?').join(',');
       users = db
         .prepare(
-          `SELECT phone, language FROM users WHERE zip IN (${placeholders})`
+          `SELECT phone, language, zip FROM users WHERE zip IN (${placeholders})`
         )
         .all(...affectedZips) as DispatchUser[];
     } finally {
@@ -63,7 +63,7 @@ export function matchByZip(alert: Alert, zip: string): DispatchList {
   let users: DispatchUser[] = [];
   try {
     users = db
-      .prepare('SELECT phone, language FROM users WHERE zip = ?')
+      .prepare('SELECT phone, language, zip FROM users WHERE zip = ?')
       .all(zip) as DispatchUser[];
   } finally {
     db.close();

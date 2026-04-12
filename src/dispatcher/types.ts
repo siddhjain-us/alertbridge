@@ -8,6 +8,7 @@ export interface MockSmsEntry {
   alertType: string;
   sentAt: string;
   alertId?: string;
+  zip: string;
 }
 
 export interface MockSmsMemoryPayload {
@@ -17,6 +18,7 @@ export interface MockSmsMemoryPayload {
   alertId: string;
   alertType: string;
   sentAt: string;
+  zip: string;
 }
 
 export function keyDispatch(alertId: string): string {

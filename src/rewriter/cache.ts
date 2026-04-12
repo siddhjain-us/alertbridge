@@ -16,3 +16,7 @@ export function setCached(alertId: string, lang: string, text: string): void {
 export function isReady(alertId: string, langs: string[]): boolean {
   return langs.every((l) => cache.has(cacheKey(alertId, l)));
 }
+
+export function clearTranslationCache(): void {
+  cache.clear();
+}
