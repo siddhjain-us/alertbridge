@@ -6,6 +6,10 @@ A multi-agent emergency alert distribution system that ingests real-time NWS fee
 
 ---
 
+## The Problem
+
+There exist over 68 million Americans that speak a language other than English at home. For those who are undereducated or simply prefer a language other than English, I created AlertBridge. AlertBridge is a multi-agent system that parses the government database for real-time emergency alerts and sends it to the user in their registered language (6 languages registered so far) and their registered zip-code. I created it to take action against incidents such as the LA Wildfires in January 2025, where over 12000+ LEP residents in evacuation zones got no warnings, and had a hard time evacuating. **Language can be a life-or-death gap in emergency alerts**
+
 ## Highlights
 
 | Category | What's here |
