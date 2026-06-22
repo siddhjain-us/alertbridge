@@ -31,25 +31,8 @@ A multi-agent emergency alert distribution system that ingests real-time NWS fee
 
 ## Architecture
 
-```
-NWS GeoJSON API  →  alert-poller  →  geo-matcher  →  ai-rewriter  →  sms-dispatcher  →  Twilio WhatsApp
-       ↑                                   ↑                ↑                ↑
-  polls every 60s                     SQLite DB       OpenRouter /     dedup via
-                                    (subscribers)    Claude API      sent_alerts table
-```
+<img width="1141" height="593" alt="image" src="https://github.com/user-attachments/assets/ae0e2554-f51c-4141-905c-6f62db1d2e8e" />
 
-```mermaid
-graph LR
-    NWS[NWS GeoJSON API\napi.weather.gov] -->|poll / 60s| Poller
-    Poller -->|Alert + FIPS codes| Matcher
-    Matcher -->|DispatchList\nusers + ZIP| Rewriter
-    Rewriter -->|LLM translation\nper language| Dispatcher
-    Dispatcher -->|Real WhatsApp| Twilio
-    Dispatcher -->|Dashboard log| Store[(In-Memory)]
-    Registration -->|phone, zip, lang| DB[(SQLite)]
-    Matcher --> DB
-    Dispatcher --> DB
-```
 
 **6-agent pipeline (single Node.js process, phase-ordered):**
 
@@ -96,6 +79,8 @@ AlertBridge uses the **Twilio WhatsApp Sandbox** (+1 415 523 8886) rather than a
 5. You're registered — text `STOP` anytime to unsubscribe
 
 The registration state machine is backed by SQLite so **registrations survive server restarts**.
+<img width="576" height="900" alt="image" src="https://github.com/user-attachments/assets/9b8eb034-6bc0-45ab-bfa3-d6df74646d38" />
+
 
 ---
 
@@ -111,6 +96,10 @@ The registration state machine is backed by SQLite so **registrations survive se
 | `6` | Korean / 한국어 | "등록되었습니다! …지역의 한국어 긴급 경보를 받게 됩니다." |
 
 ---
+
+## Dashboard Preview
+<img width="571" height="661" alt="image" src="https://github.com/user-attachments/assets/68b9871e-fa6f-47f6-8d4c-fa49cb60f5ed" />
+
 
 ## Architectural Trade-offs
 
