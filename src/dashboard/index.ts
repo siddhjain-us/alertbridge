@@ -2,6 +2,7 @@ import express from 'express';
 import Database from 'better-sqlite3';
 import path from 'path';
 import router from './routes';
+import registrationRouter from '../registration/index';
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
@@ -9,6 +10,7 @@ const DB_PATH = path.join(__dirname, '../../db/alertbridge.db');
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(registrationRouter);
 app.use(router);
 
 // Ensure tables exist (graceful if already created by registration-handler)
