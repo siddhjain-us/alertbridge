@@ -1,75 +1,169 @@
 # AlertBridge
 
-A multi-agent emergency alert distribution system that parses real-time NWS CAP/Atom feeds, geo-matches alerts to registered subscribers by county, rewrites them into plain-language SMS using the Claude API, and delivers them via Twilio — across 6 languages.
+A multi-agent emergency alert distribution system that ingests real-time NWS feeds, geo-matches alerts to subscribers by county, rewrites them into plain-language messages using an LLM, and delivers them via Twilio WhatsApp across 6 languages.
 
-**[Live Demo →](https://alertbridge-production.up.railway.app)** &nbsp;|&nbsp; Built in 24 hours at a hackathon
+**[Live Demo →](https://alertbridge-fzml.onrender.com)** &nbsp;|&nbsp; Deployed on Render &nbsp;|&nbsp; Built in 24 hours at a hackathon
+
+---
+
+## Highlights
+
+| Category | What's here |
+|---|---|
+| **Version control** | GitHub — full commit history, feature branches |
+| **Containerization** | Docker multi-stage build + Docker Compose for local dev |
+| **CI/CD** | Render auto-deploys on every push to `main` — zero-downtime redeploys |
+| **Cloud deployment** | Render (persistent Node.js server, live at the URL above) |
+| **AI integration** | OpenRouter / Claude API — LLM rewrites raw NWS alert text into plain-language SMS per language |
+| **Messaging API** | Twilio WhatsApp Sandbox — real message delivery, no carrier approval needed |
+| **Multilingual** | 6 languages: English, Spanish, Chinese, Vietnamese, Tagalog, Korean |
 
 ---
 
 ## What It Does
 
-- **Ingests real NWS data** — Polls the [National Weather Service CAP/Atom feed](https://alerts.weather.gov/cap/us.php?x=1) every 60 seconds for live emergency alerts (floods, hurricanes, wildfires, etc.)
-- **Geo-matches by county** — Extracts FIPS county codes from CAP geocode fields and maps them to ZIP codes via a crosswalk covering **3,142 US counties and ~40,000 ZIP codes**
-- **Rewrites with AI** — Uses the Claude API to compress verbose NWS alert text into ≤160-character plain-language SMS, per-language, with fallback chains
-- **Delivers via Twilio** — Fans out to all registered subscribers in affected ZIPs with SQL-enforced deduplication; falls back to mock logging when Twilio is unconfigured
+1. **Polls the NWS GeoJSON API** every 60 seconds for live emergency alerts (floods, hurricanes, wildfires, tornadoes, etc.)
+2. **Geo-matches by county** — extracts FIPS codes from NWS geocode fields, maps them to ZIP codes via a 3,142-county crosswalk
+3. **Rewrites with an LLM** — sends raw NWS alert text to OpenRouter (or Claude) and gets back a plain-language message, per-language, per-alert
+4. **Delivers via Twilio WhatsApp** — fans out to all registered subscribers in affected ZIPs; SQL-enforced deduplication prevents duplicates across restarts
 
 ---
 
 ## Architecture
 
+```
+NWS GeoJSON API  →  alert-poller  →  geo-matcher  →  ai-rewriter  →  sms-dispatcher  →  Twilio WhatsApp
+       ↑                                   ↑                ↑                ↑
+  polls every 60s                     SQLite DB       OpenRouter /     dedup via
+                                    (subscribers)    Claude API      sent_alerts table
+```
+
 ```mermaid
 graph LR
-    NWS[NWS CAP Feed\nalerts.weather.gov] -->|XML poll / 60s| Poller
+    NWS[NWS GeoJSON API\napi.weather.gov] -->|poll / 60s| Poller
     Poller -->|Alert + FIPS codes| Matcher
-    Matcher -->|DispatchList\nusers + ZIPs| Rewriter
-    Rewriter -->|Translations\nper language| Dispatcher
-    Dispatcher -->|Real SMS| Twilio
+    Matcher -->|DispatchList\nusers + ZIP| Rewriter
+    Rewriter -->|LLM translation\nper language| Dispatcher
+    Dispatcher -->|Real WhatsApp| Twilio
     Dispatcher -->|Dashboard log| Store[(In-Memory)]
     Registration -->|phone, zip, lang| DB[(SQLite)]
     Matcher --> DB
     Dispatcher --> DB
 ```
 
-**Agent pipeline (single Node.js process, phase-ordered):**
+**6-agent pipeline (single Node.js process, phase-ordered):**
 
 | Agent | Role |
 |---|---|
-| `alert-poller` | Fetches and parses NWS CAP/Atom XML; deduplicates by alert ID |
-| `geo-matcher` | Looks up FIPS→ZIP crosswalk; queries SQLite for subscribers in affected ZIPs |
-| `ai-rewriter` | Calls Claude API to produce ≤160-char SMS; caches per (alertId, language) |
-| `sms-dispatcher` | Fans out to subscribers with 5-concurrent limit; dedupes via `sent_alerts` table |
-| `registration-handler` | Express webhook — 3-step SMS state machine (ZIP → language → confirm) |
-| `dashboard` | Live observability UI with real-time SMS log, stats, and simulation trigger |
+| `alert-poller` | Fetches NWS GeoJSON; deduplicates by alert ID |
+| `geo-matcher` | FIPS→ZIP crosswalk lookup; queries SQLite for subscribers |
+| `ai-rewriter` | Calls LLM to produce plain-language alert text; caches per (alertId, language) |
+| `sms-dispatcher` | Fans out to subscribers; dedupes via `sent_alerts` table |
+| `registration-handler` | Twilio WhatsApp webhook — 3-step state machine (ZIP → language → confirm) |
+| `dashboard` | Live observability UI with real-time SMS log, stats, simulation trigger |
 
 ---
 
-## Design Decisions
+## LLM Integration
 
-| Decision | Choice | Why |
+The `ai-rewriter` agent translates raw NWS alert text into plain language for each subscriber's language. The LLM backends are priority-ordered with automatic fallback:
+
+```
+ANTHROPIC_API_KEY set?  →  Claude (claude-haiku-4-5-20251001)
+OPENROUTER_API_KEY set? →  OpenRouter (configurable model, default: openrouter/owl-alpha)
+OLLAMA_URL set?         →  Ollama (local dev, llama3.2)
+None set?               →  Raw NWS text passthrough (truncated)
+```
+
+- Translations are **cached per (alertId, language)** — each alert is only translated once per language regardless of how many subscribers share that language
+- For zh/vi/ko, a **retry chain with hardcoded fallbacks** ensures a valid message is always delivered even if the LLM returns English
+- The OpenRouter integration uses the OpenAI-compatible REST API with plain `fetch` — no extra SDK dependency
+
+---
+
+## Twilio WhatsApp Sandbox
+
+AlertBridge uses the **Twilio WhatsApp Sandbox** (+1 415 523 8886) rather than a verified toll-free number. This means:
+- No carrier approval process required
+- Works immediately for opted-in testers
+- Real WhatsApp message delivery (not simulated)
+
+**To test as a subscriber:**
+1. Open WhatsApp → send `join <sandbox-keyword>` to **+1 415 523 8886** (keyword in [Twilio console](https://console.twilio.com) → Messaging → Try it out → Send a WhatsApp message)
+2. Text any message to opt into registration
+3. Bot replies asking for your 5-digit ZIP code
+4. Reply with a number 1–6 to choose your language
+5. You're registered — text `STOP` anytime to unsubscribe
+
+The registration state machine is backed by SQLite so **registrations survive server restarts**.
+
+---
+
+## Supported Languages
+
+| Code | Language | Confirmation message |
 |---|---|---|
-| **Alert source** | NWS CAP/Atom XML feed (polled) | Real-time official data; no auth required; polling simpler than webhooks for a stateless poller |
-| **Geo-routing** | FIPS→ZIP crosswalk JSON | CAP alerts use FIPS county codes natively; ZIP is what users know — a static crosswalk avoids a geocoding API call per alert |
-| **AI translation** | Claude API (`claude-haiku-4-5-20251001`) | Handles nuanced emergency language better than rule-based translation; haiku is fast enough for real-time fan-out; falls back to Ollama for local dev |
-| **SMS delivery** | Twilio Programmable SMS | Standard for programmable SMS; Twilio Sandbox lets trial accounts send to verified numbers without carrier approval |
-| **Storage** | SQLite (`better-sqlite3`) | ACID `INSERT OR IGNORE` enforces dedup at the DB layer; no infrastructure overhead; survives process restarts |
-| **Dedup strategy** | `UNIQUE(phone, alert_id)` in `sent_alerts` | Survives restarts (unlike in-memory sets); enforced by the database so application bugs can't double-send |
-| **Concurrency** | 5-user batch limit in dispatcher | Respects Twilio rate limits and Claude API throughput; `Promise.all` within each batch for parallelism |
-| **Dashboard** | Server-rendered HTML + 3s polling | No build step, no bundler; works in any browser; real-time feel without a WebSocket |
+| `1` | English | "You're registered! You'll get emergency alerts for ZIP…" |
+| `2` | Spanish / Español | "¡Registrado! Recibirás alertas de emergencia para…" |
+| `3` | Chinese / 中文 | "注册成功！您将收到…地区的中文紧急警报。" |
+| `4` | Vietnamese / Tiếng Việt | "Đã đăng ký! Bạn sẽ nhận cảnh báo khẩn cấp cho…" |
+| `5` | Tagalog / Filipino | "Nakarehistro na! Makakatanggap ka ng mga alerto para sa…" |
+| `6` | Korean / 한국어 | "등록되었습니다! …지역의 한국어 긴급 경보를 받게 됩니다." |
 
 ---
 
-## Scale
+## Architectural Trade-offs
 
-- FIPS crosswalk: **3,142 US counties**, **~40,000 ZIP codes**
-- Languages supported: **6** (English, Spanish, Chinese, Vietnamese, Tagalog, Korean)
-- Simulation scenarios: **9** (flash flood, hurricane, earthquake, wildfire, tornado, drought, tsunami, landslide, volcanic)
-- Alert deduplication: SQL-enforced, persists across restarts
+| Decision | Choice | Rejected alternative | Why |
+|---|---|---|---|
+| **Alert source** | NWS GeoJSON API (polled) | Webhooks / third-party alert services | Official real-time data; no auth; polling simpler than managing webhook infra |
+| **Geo-routing** | FIPS→ZIP static crosswalk | Geocoding API per alert | NWS uses FIPS natively; ZIP is what users know; static crosswalk = zero latency, zero cost per lookup |
+| **LLM backend** | OpenRouter free tier (cloud) + Ollama (local) | Fixed templates, rule-based translation | LLM handles nuanced emergency language and multi-language output better than any rules engine |
+| **SMS transport** | Twilio WhatsApp Sandbox | Toll-free SMS, short code | Toll-free verification blocked for individuals; WhatsApp Sandbox delivers real messages to opted-in users with zero setup friction |
+| **Storage** | SQLite (`better-sqlite3`) | PostgreSQL, Redis | ACID `INSERT OR IGNORE` enforces dedup at the DB layer; no infra overhead; survives restarts |
+| **Dedup strategy** | `UNIQUE(phone, alert_id)` in `sent_alerts` | In-memory Set | DB-level constraint survives restarts and is immune to application-level bugs |
+| **Concurrency** | 5-user batch limit | Unlimited `Promise.all` | Respects Twilio rate limits; `Promise.all` within each batch for parallelism |
+| **Deployment** | Render (persistent server) | Vercel, AWS Lambda | Vercel is stateless/serverless — incompatible with a persistent cron loop and SQLite filesystem |
+| **Containerization** | Docker multi-stage build | Direct `npm start` on bare metal | Reproducible builds; isolates Node version; enables local dev parity with production |
+
+---
+
+## CI/CD Pipeline
+
+Every `git push` to `main` triggers an automatic Render redeploy:
+
+```
+git push origin main
+       ↓
+Render detects new commit
+       ↓
+npm install → npm start
+       ↓
+Zero-downtime swap (old instance kept alive until health check passes)
+```
+
+No manual deploy steps after initial setup.
+
+---
+
+## Docker
+
+```bash
+# Build and run locally
+docker compose up --build
+
+# Or build the image directly
+docker build -t alertbridge .
+docker run -p 3000:3000 --env-file .env alertbridge
+```
+
+The `db/` directory is mounted as a volume in Docker Compose so the SQLite database persists across container restarts.
 
 ---
 
 ## Local Setup
 
-**Prerequisites:** Node.js 18+, a Twilio account (trial is fine), an Anthropic API key
+**Prerequisites:** Node.js 20+, a Twilio account, an OpenRouter or Anthropic API key
 
 ```bash
 git clone https://github.com/siddhjain-us/alertbridge.git
@@ -90,17 +184,15 @@ npm run seed:demo
 
 ### Environment Variables
 
-See [`.env.example`](.env.example) for the full list. Key vars:
-
 | Variable | Required | Description |
 |---|---|---|
-| `TWILIO_ACCOUNT_SID` | For real SMS | From console.twilio.com |
-| `TWILIO_AUTH_TOKEN` | For real SMS | From console.twilio.com |
-| `TWILIO_PHONE_NUMBER` | For real SMS | Your Twilio number (e.g. `+15551234567`) |
-| `ANTHROPIC_API_KEY` | For AI translation | From console.anthropic.com — required on Railway |
-| `OLLAMA_URL` | Local dev fallback | Defaults to `http://localhost:11434` |
-
-If Twilio env vars are absent, the dispatcher logs mock SMS to console and the dashboard — useful for local demos without a Twilio account.
+| `TWILIO_ACCOUNT_SID` | For real WhatsApp | From console.twilio.com |
+| `TWILIO_AUTH_TOKEN` | For real WhatsApp | From console.twilio.com |
+| `TWILIO_PHONE_NUMBER` | For real WhatsApp | WhatsApp Sandbox number: `+14155238886` |
+| `ANTHROPIC_API_KEY` | LLM translation (option 1) | From console.anthropic.com |
+| `OPENROUTER_API_KEY` | LLM translation (option 2) | From openrouter.ai — free tier available |
+| `OPENROUTER_MODEL` | Optional | Default: `openrouter/owl-alpha` |
+| `OLLAMA_URL` | Local dev fallback | Default: `http://localhost:11434` |
 
 ---
 
@@ -109,45 +201,34 @@ If Twilio env vars are absent, the dispatcher logs mock SMS to console and the d
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/` | Live dashboard (HTML) |
-| `GET` | `/api/stats` | User counts + SMS sent count |
-| `GET` | `/api/sms-log` | JSON array of delivered SMS entries |
+| `GET` | `/api/stats` | User counts + SMS sent |
+| `GET` | `/api/sms-log` | JSON array of delivered messages |
 | `GET` | `/api/subscribers` | Registered users (ZIP, language, masked phone) |
-| `GET` | `/api/simulate-scenarios` | Available simulation scenario IDs |
+| `GET` | `/api/simulate-scenarios` | Available scenario IDs |
 | `POST` | `/simulate` | Trigger full pipeline: `{ "zip": "94102", "scenario": "flash_flood" }` |
-| `POST` | `/sms` | Twilio webhook for SMS registration |
-| `POST` | `/api/clear-data` | Reset demo data (SQLite + in-memory cache) |
+| `POST` | `/sms` | Twilio WhatsApp webhook for registration |
+| `DELETE` | `/api/users/:phone` | Admin deregister a user by phone |
+| `POST` | `/api/clear-data` | Reset all demo data |
 
 Valid scenario IDs: `flash_flood`, `hurricane`, `earthquake`, `wildfire`, `tornado`, `drought`, `tsunami`, `landslide`, `volcanic`
 
 ---
 
-## Project Layout
+## Scale
 
-```
-src/
-  poller/         # NWS feed fetch, CAP XML parser, cron loop
-  matcher/        # FIPS→ZIP crosswalk, subscriber lookup
-  rewriter/       # Claude/Ollama translation, cache, fallback chains
-  dispatcher/     # Twilio SMS fan-out, dedup, mock log
-  registration/   # SMS registration state machine
-  dashboard/      # Express UI, REST API, simulation scenarios
-data/
-  fips-to-zip.json  # County→ZIP crosswalk (3,142 counties)
-db/               # SQLite (alertbridge.db gitignored)
-index.ts          # Orchestrator — starts all agents in phase order
-railway.toml      # Railway deployment config
-```
+- FIPS crosswalk: **3,142 US counties**, **~40,000 ZIP codes**
+- Languages: **6** (EN, ES, ZH, VI, TL, KO)
+- Simulation scenarios: **9**
+- Alert deduplication: SQL-enforced, persists across restarts
 
 ---
 
-## Resume Bullet Points
+## Resume Bullets
 
-> Copy-paste ready for your resume:
-
-- Built a 6-agent emergency alert distribution system (Node.js/TypeScript) that parses real-time NWS CAP/Atom XML feeds and geo-matches alerts to subscribers using a FIPS-to-ZIP crosswalk covering 3,142 US counties
-- Designed an AI translation pipeline using the Claude API with multi-level caching, language-detection fallbacks, and ≤160-character truncation for SMS delivery across 6 languages (EN/ES/ZH/VI/TL/KO)
-- Integrated Twilio Programmable SMS for alert delivery with SQL-enforced deduplication (`UNIQUE(phone, alert_id)`) to prevent duplicate alerts across process restarts
-- Deployed on Railway with environment-driven configuration (Claude API on cloud, Ollama fallback for local dev); live dashboard with real-time observability via server-rendered HTML
+- Built a 6-agent emergency alert system (Node.js/TypeScript) that polls the NWS GeoJSON API in real time, geo-matches alerts to subscribers using a FIPS→ZIP crosswalk covering 3,142 US counties, and delivers WhatsApp messages via Twilio across 6 languages
+- Integrated OpenRouter / Claude API as an LLM translation backend with multi-level fallback chains and per-(alertId, language) caching; added raw text passthrough so the system degrades gracefully with no API key configured
+- Containerized with Docker (multi-stage build) and deployed to Render with GitHub-triggered CI/CD — every push to `main` triggers a zero-downtime redeploy
+- Designed SQL-enforced deduplication (`UNIQUE(phone, alert_id)`) in SQLite to prevent duplicate alerts across process and container restarts; backed WhatsApp registration state machine with persistent DB so users stay registered across deploys
 
 ---
 
