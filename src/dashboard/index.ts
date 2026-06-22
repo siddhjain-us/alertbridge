@@ -4,7 +4,7 @@ import path from 'path';
 import router from './routes';
 
 const app = express();
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const DB_PATH = path.join(__dirname, '../../db/alertbridge.db');
 
 app.use(express.json());

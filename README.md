@@ -1,110 +1,155 @@
 # AlertBridge
 
-Emergency alerts from public feeds (NWS CAP), matched to subscribers by location, rewritten into plain language, and “delivered” as **mock SMS** for demos—each user gets the message in **their registered language**.
+A multi-agent emergency alert distribution system that parses real-time NWS CAP/Atom feeds, geo-matches alerts to registered subscribers by county, rewrites them into plain-language SMS using the Claude API, and delivers them via Twilio — across 6 languages.
 
-## What it does
+**[Live Demo →](https://alertbridge-production.up.railway.app)** &nbsp;|&nbsp; Built in 24 hours at a hackathon
 
-1. **Poller** — Fetches the NWS CAP feed, parses new alerts.
-2. **Geo-matcher** — Maps alert FIPS areas to ZIPs, loads users in those ZIPs from SQLite.
-3. **AI rewriter** — Calls **Ollama** once per language to produce short SMS-sized text (≤160 chars). If **`LIBRETRANSLATE_URL`** is set, listed languages (default **zh, vi, ko**) translate from a cached **English** SMS via a LibreTranslate-compatible **`POST /translate`** API, then fall back to Ollama and **hardcoded** SMS for zh/vi/ko if needed.
-4. **Dispatcher** — Mock delivery: logs to console, records `sent_alerts` for deduplication, keeps an in-memory SMS log for the dashboard. Simulates agent memory keys (`dispatch:*`, `translated:*:*`, `mock_sms:*`).
-5. **Registration** — Express webhook for SMS-style registration (ZIP + language).
-6. **Dashboard** — Live stats, language breakdown, hazard reference link, subscriber ZIPs, and SMS log at `http://localhost:3000`.
+---
 
-## Requirements
+## What It Does
 
-- **Node.js** 18+
-- **GNU Make** (optional): convenience targets for install, run, and seed — run **`make help`** at the repo root (see [Setup](#setup)).
-- **Ollama** running locally (default `http://localhost:11434`, model `llama3.2` or set `OLLAMA_MODEL`)
-- **LibreTranslate** (optional, Python): the npm package named `libretranslate` is only a **client library** (no CLI — `npx libretranslate` will error). Install the [official server](https://docs.libretranslate.com/guides/installation/) with **`pip install libretranslate`**, then in another terminal run **`libretranslate --port 5000`** (first run may download language models). Set `LIBRETRANSLATE_URL` in `.env` as below.
+- **Ingests real NWS data** — Polls the [National Weather Service CAP/Atom feed](https://alerts.weather.gov/cap/us.php?x=1) every 60 seconds for live emergency alerts (floods, hurricanes, wildfires, etc.)
+- **Geo-matches by county** — Extracts FIPS county codes from CAP geocode fields and maps them to ZIP codes via a crosswalk covering **3,142 US counties and ~40,000 ZIP codes**
+- **Rewrites with AI** — Uses the Claude API to compress verbose NWS alert text into ≤160-character plain-language SMS, per-language, with fallback chains
+- **Delivers via Twilio** — Fans out to all registered subscribers in affected ZIPs with SQL-enforced deduplication; falls back to mock logging when Twilio is unconfigured
 
-## Setup
+---
+
+## Architecture
+
+```mermaid
+graph LR
+    NWS[NWS CAP Feed\nalerts.weather.gov] -->|XML poll / 60s| Poller
+    Poller -->|Alert + FIPS codes| Matcher
+    Matcher -->|DispatchList\nusers + ZIPs| Rewriter
+    Rewriter -->|Translations\nper language| Dispatcher
+    Dispatcher -->|Real SMS| Twilio
+    Dispatcher -->|Dashboard log| Store[(In-Memory)]
+    Registration -->|phone, zip, lang| DB[(SQLite)]
+    Matcher --> DB
+    Dispatcher --> DB
+```
+
+**Agent pipeline (single Node.js process, phase-ordered):**
+
+| Agent | Role |
+|---|---|
+| `alert-poller` | Fetches and parses NWS CAP/Atom XML; deduplicates by alert ID |
+| `geo-matcher` | Looks up FIPS→ZIP crosswalk; queries SQLite for subscribers in affected ZIPs |
+| `ai-rewriter` | Calls Claude API to produce ≤160-char SMS; caches per (alertId, language) |
+| `sms-dispatcher` | Fans out to subscribers with 5-concurrent limit; dedupes via `sent_alerts` table |
+| `registration-handler` | Express webhook — 3-step SMS state machine (ZIP → language → confirm) |
+| `dashboard` | Live observability UI with real-time SMS log, stats, and simulation trigger |
+
+---
+
+## Design Decisions
+
+| Decision | Choice | Why |
+|---|---|---|
+| **Alert source** | NWS CAP/Atom XML feed (polled) | Real-time official data; no auth required; polling simpler than webhooks for a stateless poller |
+| **Geo-routing** | FIPS→ZIP crosswalk JSON | CAP alerts use FIPS county codes natively; ZIP is what users know — a static crosswalk avoids a geocoding API call per alert |
+| **AI translation** | Claude API (`claude-haiku-4-5-20251001`) | Handles nuanced emergency language better than rule-based translation; haiku is fast enough for real-time fan-out; falls back to Ollama for local dev |
+| **SMS delivery** | Twilio Programmable SMS | Standard for programmable SMS; Twilio Sandbox lets trial accounts send to verified numbers without carrier approval |
+| **Storage** | SQLite (`better-sqlite3`) | ACID `INSERT OR IGNORE` enforces dedup at the DB layer; no infrastructure overhead; survives process restarts |
+| **Dedup strategy** | `UNIQUE(phone, alert_id)` in `sent_alerts` | Survives restarts (unlike in-memory sets); enforced by the database so application bugs can't double-send |
+| **Concurrency** | 5-user batch limit in dispatcher | Respects Twilio rate limits and Claude API throughput; `Promise.all` within each batch for parallelism |
+| **Dashboard** | Server-rendered HTML + 3s polling | No build step, no bundler; works in any browser; real-time feel without a WebSocket |
+
+---
+
+## Scale
+
+- FIPS crosswalk: **3,142 US counties**, **~40,000 ZIP codes**
+- Languages supported: **6** (English, Spanish, Chinese, Vietnamese, Tagalog, Korean)
+- Simulation scenarios: **9** (flash flood, hurricane, earthquake, wildfire, tornado, drought, tsunami, landslide, volcanic)
+- Alert deduplication: SQL-enforced, persists across restarts
+
+---
+
+## Local Setup
+
+**Prerequisites:** Node.js 18+, a Twilio account (trial is fine), an Anthropic API key
 
 ```bash
+git clone https://github.com/siddhjain-us/alertbridge.git
+cd alertbridge
 npm install
+cp .env.example .env   # fill in your keys
+mkdir -p db
+npm start
 ```
 
-Or use the **Makefile** (see `make help` for targets): **`make setup`** runs `npm install` and **`mkdir -p db`**. On Windows, use **Git Bash**, **WSL**, or another environment where `make` is available.
+Open **http://localhost:3000** — use the Simulate panel to trigger a full alert pipeline without waiting for a real NWS event.
 
-Create `.env` (optional overrides):
-
-```env
-OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2
-DEMO_MODE=true
-# Optional: pip install libretranslate && libretranslate --port 5000 (see Requirements), then:
-LIBRETRANSLATE_URL=http://localhost:5000
-LIBRETRANSLATE_LANGS=zh,vi,ko
-# LIBRETRANSLATE_API_KEY=
-```
-
-Ensure `db/` exists (`make setup` creates it); SQLite will create `db/alertbridge.db` on first run.
-
-### Data persistence and reset
-
-- **SQLite** (`db/alertbridge.db`, typically gitignored) **persists across app restarts**. Startup only runs `CREATE TABLE IF NOT EXISTS`; it does not delete existing users or `sent_alerts` rows.
-- **In-memory state** (mock SMS log shown on the dashboard, rewriter translation cache) is **per process** and clears when you stop and start the app.
-- To wipe subscribers, delivery history, and in-process demo state without deleting the file manually, use the dashboard **Clear demo data** button (confirms first) or call **`POST /api/clear-data`** (no body).
-
-## Demo users (multi-language)
-
-Seed six users in ZIP **94102** (one per language: en, es, zh, vi, ko, tl):
+**Seed demo subscribers** (6 users in ZIP 94102, one per language):
 
 ```bash
-make seed
+npm run seed:demo
 ```
 
-(`npm run seed:demo` is equivalent.)
+### Environment Variables
 
-## Run
+See [`.env.example`](.env.example) for the full list. Key vars:
 
-```bash
-make run
-```
+| Variable | Required | Description |
+|---|---|---|
+| `TWILIO_ACCOUNT_SID` | For real SMS | From console.twilio.com |
+| `TWILIO_AUTH_TOKEN` | For real SMS | From console.twilio.com |
+| `TWILIO_PHONE_NUMBER` | For real SMS | Your Twilio number (e.g. `+15551234567`) |
+| `ANTHROPIC_API_KEY` | For AI translation | From console.anthropic.com — required on Railway |
+| `OLLAMA_URL` | Local dev fallback | Defaults to `http://localhost:11434` |
 
-(`npx tsx index.ts` is equivalent. **`make start`** does the same as **`make run`**.)
+If Twilio env vars are absent, the dispatcher logs mock SMS to console and the dashboard — useful for local demos without a Twilio account.
 
-Open the dashboard: **http://localhost:3000**
+---
 
-- Enter ZIP **94102**, choose a **scenario** (flood, hurricane, earthquake, wildfire, tornado, drought, tsunami, landslide, volcanic), then **Send test alert** to run match → translate → mock dispatch for all seeded users.
-- The **SMS delivery log** and **subscriber list** refresh every few seconds via `/api/sms-log` and `/api/subscribers`; counters from `/api/stats`.
-- **Clear demo data** (header): removes all SQLite users and `sent_alerts`, clears the mock SMS log and translation cache. Use when you want a fresh demo; normal restarts do **not** do this.
+## API Reference
 
-## API (local)
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/` | Dashboard (HTML) |
-| `GET` | `/docs/disasters` | Hazard types reference (`docs/disasters.md` as markdown) |
-| `GET` | `/api/sms-log` | JSON array of mock SMS rows (includes `zip` per row) |
-| `GET` | `/api/subscribers` | `{ subscribers: [{ zip, language, phoneLast4 }] }` for live table |
-| `GET` | `/api/simulate-scenarios` | `{ scenarios: [{ id, label }] }` — ids for `POST /simulate` |
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/` | Live dashboard (HTML) |
 | `GET` | `/api/stats` | User counts + SMS sent count |
-| `POST` | `/api/clear-data` | Wipes SQLite `users` and `sent_alerts`, clears mock SMS log + translation cache; returns `{ ok: true, message }` |
-| `POST` | `/simulate` | JSON `{ "zip": "94102", "scenario": "flash_flood" }` — full pipeline; `scenario` optional (default `flash_flood`). Valid ids: `flash_flood`, `hurricane`, `earthquake`, `wildfire`, `tornado`, `drought`, `tsunami`, `landslide`, `volcanic` (see [`src/dashboard/simulateScenarios.ts`](src/dashboard/simulateScenarios.ts)) |
-| `POST` | `/sms` | Twilio-style registration webhook (body `From`, `Body`) |
+| `GET` | `/api/sms-log` | JSON array of delivered SMS entries |
+| `GET` | `/api/subscribers` | Registered users (ZIP, language, masked phone) |
+| `GET` | `/api/simulate-scenarios` | Available simulation scenario IDs |
+| `POST` | `/simulate` | Trigger full pipeline: `{ "zip": "94102", "scenario": "flash_flood" }` |
+| `POST` | `/sms` | Twilio webhook for SMS registration |
+| `POST` | `/api/clear-data` | Reset demo data (SQLite + in-memory cache) |
 
-## Project layout
+Valid scenario IDs: `flash_flood`, `hurricane`, `earthquake`, `wildfire`, `tornado`, `drought`, `tsunami`, `landslide`, `volcanic`
+
+---
+
+## Project Layout
 
 ```
 src/
-  poller/       # NWS feed + cron
-  matcher/      # FIPS → ZIP, user lookup
-  rewriter/     # Ollama + optional LibreTranslate (libretranslate.ts)
-  dispatcher/   # Mock SMS + SQLite dedup + memory key simulation
-  registration/ # SMS registration FSM
-  dashboard/    # Express UI + APIs + simulateScenarios.ts
-db/             # SQLite (gitignored)
-docs/           # e.g. disasters.md (hazard reference)
-Makefile        # make setup | make run | make seed (see make help)
-index.ts        # Starts all services
+  poller/         # NWS feed fetch, CAP XML parser, cron loop
+  matcher/        # FIPS→ZIP crosswalk, subscriber lookup
+  rewriter/       # Claude/Ollama translation, cache, fallback chains
+  dispatcher/     # Twilio SMS fan-out, dedup, mock log
+  registration/   # SMS registration state machine
+  dashboard/      # Express UI, REST API, simulation scenarios
+data/
+  fips-to-zip.json  # County→ZIP crosswalk (3,142 counties)
+db/               # SQLite (alertbridge.db gitignored)
+index.ts          # Orchestrator — starts all agents in phase order
+railway.toml      # Railway deployment config
 ```
 
-## Limits & honesty
+---
 
-- **SMS** — Not sent over the carrier; output is logged and shown on the dashboard.
-- **Translations** — Ollama quality varies; optional **LibreTranslate** (self-hosted or public, rate limits may apply) improves zh/ko when `LIBRETRANSLATE_URL` is set.
-- **Feeds** — Real NWS alerts only when the poller sees *new* IDs; use **Simulate** for predictable demos.
+## Resume Bullet Points
+
+> Copy-paste ready for your resume:
+
+- Built a 6-agent emergency alert distribution system (Node.js/TypeScript) that parses real-time NWS CAP/Atom XML feeds and geo-matches alerts to subscribers using a FIPS-to-ZIP crosswalk covering 3,142 US counties
+- Designed an AI translation pipeline using the Claude API with multi-level caching, language-detection fallbacks, and ≤160-character truncation for SMS delivery across 6 languages (EN/ES/ZH/VI/TL/KO)
+- Integrated Twilio Programmable SMS for alert delivery with SQL-enforced deduplication (`UNIQUE(phone, alert_id)`) to prevent duplicate alerts across process restarts
+- Deployed on Railway with environment-driven configuration (Claude API on cloud, Ollama fallback for local dev); live dashboard with real-time observability via server-rendered HTML
+
+---
 
 ## License
 

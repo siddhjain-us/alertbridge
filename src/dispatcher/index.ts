@@ -9,6 +9,7 @@ import {
   keyMockSms,
   serializeDispatch,
 } from './types';
+import { sendSms, twilioEnabled } from './twilio';
 
 export type { MockSmsEntry } from './types';
 
@@ -138,6 +139,15 @@ export async function dispatchAlert(
             fromMemory ?? `Emergency: ${event}. Check local authorities for details.`;
 
           sendMockSms(phone, language, message, event, alertId, zip);
+
+          if (twilioEnabled()) {
+            try {
+              await sendSms(phone, message);
+              console.log(`[dispatcher] Twilio SMS sent to …${phone.replace(/\D/g, '').slice(-4)}`);
+            } catch (err) {
+              console.error(`[dispatcher] Twilio error for …${phone.replace(/\D/g, '').slice(-4)}:`, err);
+            }
+          }
         }),
       );
     }
@@ -149,8 +159,6 @@ export async function dispatchAlert(
 }
 
 export function startDispatcher() {
-  const demo = process.env.DEMO_MODE === 'true';
-  console.log(
-    `[dispatcher] Mock SMS dispatcher ready${demo ? ' (DEMO_MODE)' : ''}`
-  );
+  const mode = twilioEnabled() ? 'REAL (Twilio Sandbox)' : 'MOCK (set TWILIO_* env vars to enable)';
+  console.log(`[dispatcher] SMS mode: ${mode}`);
 }

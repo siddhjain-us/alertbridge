@@ -4,8 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "seed:demo": "tsx scripts/seed-demo-users.ts"
+    "start": "tsx index.ts",
+    "dev": "nodemon --exec tsx index.ts",
+    "seed:demo": "tsx scripts/seed-demo-users.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
@@ -17,14 +19,15 @@
     "dotenv": "^17.4.1",
     "express": "^5.2.1",
     "fast-xml-parser": "^5.5.11",
-    "node-cron": "^4.2.1"
+    "node-cron": "^4.2.1",
+    "twilio": "^6.0.2",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
     "@types/node": "^25.6.0",
     "nodemon": "^3.1.14",
-    "tsx": "^4.21.0",
     "typescript": "^6.0.2"
   }
 }

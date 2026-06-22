@@ -1,3 +1,4 @@
+import Anthropic from '@anthropic-ai/sdk';
 import { DispatchList } from '../matcher/types';
 import {
   buildTranslationPrompt,
@@ -14,6 +15,8 @@ import {
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'llama3.2';
+const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
+const anthropicClient = USE_CLAUDE ? new Anthropic() : null;
 
 const ASCII_ONLY = /^[\x00-\x7F]*$/;
 
@@ -116,6 +119,25 @@ async function ollamaGenerate(
   return (await res.json()) as { response: string };
 }
 
+async function claudeGenerate(prompt: string, maxTokens: number): Promise<{ response: string }> {
+  const msg = await anthropicClient!.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: maxTokens,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const text = (msg.content[0] as { type: 'text'; text: string }).text;
+  return { response: text };
+}
+
+async function generate(
+  prompt: string,
+  numPredict: number,
+  temperature?: number,
+): Promise<{ response: string }> {
+  if (USE_CLAUDE) return claudeGenerate(prompt, numPredict);
+  return ollamaGenerate(prompt, numPredict, temperature);
+}
+
 export async function translateOne(alertId: string, alertText: string, lang: string): Promise<string> {
   if (lang === 'en') {
     const cached = getCached(alertId, lang);
@@ -123,7 +145,7 @@ export async function translateOne(alertId: string, alertText: string, lang: str
       console.log(`[ai-rewriter] Cache hit: ${alertId}:${lang}`);
       return cached;
     }
-    const data = await ollamaGenerate(buildEnglishPrompt(alertText), 80);
+    const data = await generate(buildEnglishPrompt(alertText), 80);
     const text = cleanResponse(data.response, 'en');
     setCached(alertId, lang, text);
     console.log(`[ai-rewriter] Translated ${alertId}:${lang} → "${text}"`);
@@ -161,7 +183,7 @@ export async function translateOne(alertId: string, alertText: string, lang: str
 
   if (!FALLBACK_LANGS.has(lang)) {
     const prompt = buildTranslationPrompt(alertText, lang);
-    const data = await ollamaGenerate(prompt, lang === 'zh' ? 120 : 80, lang === 'zh' ? 0.35 : undefined);
+    const data = await generate(prompt, lang === 'zh' ? 120 : 80, lang === 'zh' ? 0.35 : undefined);
     const text = cleanResponse(data.response, lang);
     setCached(alertId, lang, text);
     console.log(`[ai-rewriter] Translated ${alertId}:${lang} → "${text}"`);
@@ -171,7 +193,7 @@ export async function translateOne(alertId: string, alertText: string, lang: str
   let text = '';
   try {
     const prompt = buildTranslationPrompt(alertText, lang);
-    const data = await ollamaGenerate(prompt, lang === 'zh' ? 120 : 80, lang === 'zh' ? 0.35 : undefined);
+    const data = await generate(prompt, lang === 'zh' ? 120 : 80, lang === 'zh' ? 0.35 : undefined);
     text = cleanResponse(data.response, lang);
   } catch (e) {
     console.warn(`[ai-rewriter] Primary pass failed for ${lang} (${alertId}):`, e);
@@ -186,7 +208,7 @@ export async function translateOne(alertId: string, alertText: string, lang: str
 
   let text2 = '';
   try {
-    const data = await ollamaGenerate(buildSimpleRetryPrompt(alertText, lang), 120, 0.3);
+    const data = await generate(buildSimpleRetryPrompt(alertText, lang), 120, 0.3);
     text2 = cleanResponse(data.response, lang);
   } catch (e) {
     console.warn(`[ai-rewriter] Retry failed for ${lang} (${alertId}):`, e);
@@ -231,7 +253,11 @@ export async function rewriteDispatch(
 }
 
 export function startRewriter() {
-  console.log(`[ai-rewriter] Using Ollama at ${OLLAMA_URL} with model ${OLLAMA_MODEL}`);
+  if (USE_CLAUDE) {
+    console.log(`[ai-rewriter] Using Claude API (claude-haiku-4-5-20251001)`);
+  } else {
+    console.log(`[ai-rewriter] Using Ollama at ${OLLAMA_URL} with model ${OLLAMA_MODEL}`);
+  }
   if (process.env.LIBRETRANSLATE_URL?.trim()) {
     console.log(`[ai-rewriter] LibreTranslate URL set; LIBRETRANSLATE_LANGS=${process.env.LIBRETRANSLATE_LANGS ?? 'zh,vi,ko'}`);
   }
