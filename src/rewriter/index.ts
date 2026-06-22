@@ -16,6 +16,8 @@ import {
 const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'llama3.2';
 const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
+const USE_OPENROUTER = !USE_CLAUDE && !!process.env.OPENROUTER_API_KEY;
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? 'meta-llama/llama-3.1-8b-instruct:free';
 const anthropicClient = USE_CLAUDE ? new Anthropic() : null;
 
 const ASCII_ONLY = /^[\x00-\x7F]*$/;
@@ -129,12 +131,31 @@ async function claudeGenerate(prompt: string, maxTokens: number): Promise<{ resp
   return { response: text };
 }
 
+async function openrouterGenerate(prompt: string, maxTokens: number): Promise<{ response: string }> {
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      max_tokens: maxTokens,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenRouter error ${res.status}: ${await res.text()}`);
+  const json = await res.json() as { choices: { message: { content: string } }[] };
+  return { response: json.choices[0].message.content };
+}
+
 async function generate(
   prompt: string,
   numPredict: number,
   temperature?: number,
 ): Promise<{ response: string }> {
   if (USE_CLAUDE) return claudeGenerate(prompt, numPredict);
+  if (USE_OPENROUTER) return openrouterGenerate(prompt, numPredict);
   try {
     return await ollamaGenerate(prompt, numPredict, temperature);
   } catch {
@@ -259,6 +280,8 @@ export async function rewriteDispatch(
 export function startRewriter() {
   if (USE_CLAUDE) {
     console.log(`[ai-rewriter] Using Claude API (claude-haiku-4-5-20251001)`);
+  } else if (USE_OPENROUTER) {
+    console.log(`[ai-rewriter] Using OpenRouter (${OPENROUTER_MODEL})`);
   } else if (process.env.OLLAMA_URL) {
     console.log(`[ai-rewriter] Using Ollama at ${OLLAMA_URL} with model ${OLLAMA_MODEL}`);
   } else {
