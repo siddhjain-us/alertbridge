@@ -135,7 +135,11 @@ async function generate(
   temperature?: number,
 ): Promise<{ response: string }> {
   if (USE_CLAUDE) return claudeGenerate(prompt, numPredict);
-  return ollamaGenerate(prompt, numPredict, temperature);
+  try {
+    return await ollamaGenerate(prompt, numPredict, temperature);
+  } catch {
+    return { response: '' };
+  }
 }
 
 export async function translateOne(alertId: string, alertText: string, lang: string): Promise<string> {
@@ -146,7 +150,7 @@ export async function translateOne(alertId: string, alertText: string, lang: str
       return cached;
     }
     const data = await generate(buildEnglishPrompt(alertText), 80);
-    const text = cleanResponse(data.response, 'en');
+    const text = cleanResponse(data.response, 'en') || truncateForLang(alertText, 'en');
     setCached(alertId, lang, text);
     console.log(`[ai-rewriter] Translated ${alertId}:${lang} → "${text}"`);
     return text;
@@ -184,7 +188,7 @@ export async function translateOne(alertId: string, alertText: string, lang: str
   if (!FALLBACK_LANGS.has(lang)) {
     const prompt = buildTranslationPrompt(alertText, lang);
     const data = await generate(prompt, lang === 'zh' ? 120 : 80, lang === 'zh' ? 0.35 : undefined);
-    const text = cleanResponse(data.response, lang);
+    const text = cleanResponse(data.response, lang) || truncateForLang(alertText, lang);
     setCached(alertId, lang, text);
     console.log(`[ai-rewriter] Translated ${alertId}:${lang} → "${text}"`);
     return text;
@@ -255,8 +259,10 @@ export async function rewriteDispatch(
 export function startRewriter() {
   if (USE_CLAUDE) {
     console.log(`[ai-rewriter] Using Claude API (claude-haiku-4-5-20251001)`);
-  } else {
+  } else if (process.env.OLLAMA_URL) {
     console.log(`[ai-rewriter] Using Ollama at ${OLLAMA_URL} with model ${OLLAMA_MODEL}`);
+  } else {
+    console.log(`[ai-rewriter] No AI backend — using raw alert text passthrough`);
   }
   if (process.env.LIBRETRANSLATE_URL?.trim()) {
     console.log(`[ai-rewriter] LibreTranslate URL set; LIBRETRANSLATE_LANGS=${process.env.LIBRETRANSLATE_LANGS ?? 'zh,vi,ko'}`);
