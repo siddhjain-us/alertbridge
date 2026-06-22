@@ -170,7 +170,7 @@ export async function translateOne(alertId: string, alertText: string, lang: str
       console.log(`[ai-rewriter] Cache hit: ${alertId}:${lang}`);
       return cached;
     }
-    const data = await generate(buildEnglishPrompt(alertText), 80);
+    const data = await generate(buildEnglishPrompt(alertText), 400);
     const text = cleanResponse(data.response, 'en') || truncateForLang(alertText, 'en');
     setCached(alertId, lang, text);
     console.log(`[ai-rewriter] Translated ${alertId}:${lang} → "${text}"`);
@@ -208,7 +208,7 @@ export async function translateOne(alertId: string, alertText: string, lang: str
 
   if (!FALLBACK_LANGS.has(lang)) {
     const prompt = buildTranslationPrompt(alertText, lang);
-    const data = await generate(prompt, lang === 'zh' ? 120 : 80, lang === 'zh' ? 0.35 : undefined);
+    const data = await generate(prompt, lang === 'zh' ? 600 : 400, lang === 'zh' ? 0.35 : undefined);
     const text = cleanResponse(data.response, lang) || truncateForLang(alertText, lang);
     setCached(alertId, lang, text);
     console.log(`[ai-rewriter] Translated ${alertId}:${lang} → "${text}"`);
@@ -218,7 +218,7 @@ export async function translateOne(alertId: string, alertText: string, lang: str
   let text = '';
   try {
     const prompt = buildTranslationPrompt(alertText, lang);
-    const data = await generate(prompt, lang === 'zh' ? 120 : 80, lang === 'zh' ? 0.35 : undefined);
+    const data = await generate(prompt, lang === 'zh' ? 600 : 400, lang === 'zh' ? 0.35 : undefined);
     text = cleanResponse(data.response, lang);
   } catch (e) {
     console.warn(`[ai-rewriter] Primary pass failed for ${lang} (${alertId}):`, e);
@@ -233,7 +233,7 @@ export async function translateOne(alertId: string, alertText: string, lang: str
 
   let text2 = '';
   try {
-    const data = await generate(buildSimpleRetryPrompt(alertText, lang), 120, 0.3);
+    const data = await generate(buildSimpleRetryPrompt(alertText, lang), 600, 0.3);
     text2 = cleanResponse(data.response, lang);
   } catch (e) {
     console.warn(`[ai-rewriter] Retry failed for ${lang} (${alertId}):`, e);
