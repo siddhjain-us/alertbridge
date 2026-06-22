@@ -223,15 +223,6 @@ Valid scenario IDs: `flash_flood`, `hurricane`, `earthquake`, `wildfire`, `torna
 
 ---
 
-## Resume Bullets
-
-- Built a 6-agent emergency alert system (Node.js/TypeScript) that polls the NWS GeoJSON API in real time, geo-matches alerts to subscribers using a FIPS→ZIP crosswalk covering 3,142 US counties, and delivers WhatsApp messages via Twilio across 6 languages
-- Integrated OpenRouter / Claude API as an LLM translation backend with multi-level fallback chains and per-(alertId, language) caching; added raw text passthrough so the system degrades gracefully with no API key configured
-- Containerized with Docker (multi-stage build) and deployed to Render with GitHub-triggered CI/CD — every push to `main` triggers a zero-downtime redeploy
-- Designed SQL-enforced deduplication (`UNIQUE(phone, alert_id)`) in SQLite to prevent duplicate alerts across process and container restarts; backed WhatsApp registration state machine with persistent DB so users stay registered across deploys
-
----
-
 ## License
 
 ISC
