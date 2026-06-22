@@ -33,7 +33,7 @@ const HARDCODED_FALLBACK: Record<'zh' | 'vi' | 'ko', string> = {
 
 const FALLBACK_LANGS = new Set<string>(['zh', 'vi', 'ko']);
 
-function truncateForLang(s: string, lang: string, maxLen = 160): string {
+function truncateForLang(s: string, lang: string, maxLen = 1600): string {
   if (s.length <= maxLen) return s;
   if (lang === 'zh' || lang === 'ko') {
     return [...s].slice(0, maxLen).join('');

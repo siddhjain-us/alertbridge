@@ -40,6 +40,15 @@ export function insertUser(user: UserRecord): void {
   insertStmt.run(user);
 }
 
+export function getUserByPhone(phone: string): UserRecord | undefined {
+  return db.prepare('SELECT phone, zip, language FROM users WHERE phone = ?').get(phone) as UserRecord | undefined;
+}
+
+export function deleteUser(phone: string): boolean {
+  const result = db.prepare('DELETE FROM users WHERE phone = ?').run(phone);
+  return result.changes > 0;
+}
+
 /** Remove all users and sent_alerts (demo reset). */
 export function clearSqliteData(): void {
   db.exec('DELETE FROM sent_alerts; DELETE FROM users;');

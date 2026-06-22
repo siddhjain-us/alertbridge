@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { renderDashboard, DashboardData } from './template';
 import { getMockSmsLog, getMockSmsCount, dispatchAlert, clearMockSmsState } from '../dispatcher/index';
-import { clearSqliteData } from '../registration/db';
+import { clearSqliteData, deleteUser } from '../registration/db';
 import { clearTranslationCache } from '../rewriter/cache';
 import { matchByZip } from '../matcher/index';
 import { rewriteDispatch } from '../rewriter/index';
@@ -123,6 +123,17 @@ router.get('/api/stats', (_req: Request, res: Response) => {
   }
 
   res.json({ totalUsers, languageBreakdown, totalSmsSent: getMockSmsCount() });
+});
+
+// --- DELETE /api/users/:phone — admin deregister a user by phone number ---
+router.delete('/api/users/:phone', (req: Request, res: Response) => {
+  const phone = decodeURIComponent(req.params.phone);
+  const deleted = deleteUser(phone);
+  if (deleted) {
+    res.json({ ok: true, message: `User ${phone} deregistered.` });
+  } else {
+    res.status(404).json({ ok: false, message: `No user found with phone ${phone}.` });
+  }
 });
 
 // --- POST /api/clear-data — wipe SQLite demo tables + in-process mock SMS / translation cache ---
