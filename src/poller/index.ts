@@ -5,18 +5,20 @@ import { matchAlert } from '../matcher/index';
 import { rewriteDispatch } from '../rewriter/index';
 import { dispatchAlert } from '../dispatcher/index';
 
-const NWS_URL = 'https://alerts.weather.gov/cap/us.php?x=1';
+const NWS_URL = 'https://api.weather.gov/alerts/active?status=actual';
 const seenIds = new Set<string>();
 
 async function pollAlerts(): Promise<void> {
   try {
-    const res = await fetch(NWS_URL);
+    const res = await fetch(NWS_URL, {
+      headers: { 'User-Agent': 'AlertBridge/1.0 (github.com/siddhjain-us/alertbridge)' },
+    });
     if (!res.ok) {
       console.error(`[alert-poller] HTTP ${res.status} from NWS feed`);
       return;
     }
-    const xml = await res.text();
-    const alerts = parseFeed(xml);
+    const json = await res.json();
+    const alerts = parseFeed(json);
 
     let newCount = 0;
     for (const alert of alerts) {
